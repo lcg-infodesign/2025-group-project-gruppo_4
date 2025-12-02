@@ -487,6 +487,28 @@ const FILTER_CONFIG = [
         "value": "Gran Metropolità de Barcelona",
         "useNull": false,
         "caseSensitive": true
+      },
+      {
+        "id": "0e5f5007-1f23-4696-8217-f4d6cb5771bf",
+        "logic": "OR",
+        "type": "include",
+        "table": "systems",
+        "field": "name",
+        "operator": "==",
+        "value": "Sistema Ferroviario Metropolitano Regionale",
+        "useNull": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "cf2cd8e3-8da9-4c6f-b960-f8b6c66d8a80",
+        "logic": "OR",
+        "type": "include",
+        "table": "systems",
+        "field": "name",
+        "operator": "==",
+        "value": "Trenes Metropolitanos",
+        "useNull": false,
+        "caseSensitive": true
       }
     ],
     "not": true
@@ -657,6 +679,17 @@ const FILTER_CONFIG = [
         "field": "name",
         "operator": "==",
         "value": "U-Bahn",
+        "useNull": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "189cf9f6-af1b-4c3e-ba03-ced65ddeaf04",
+        "logic": "OR",
+        "type": "include",
+        "table": "systems",
+        "field": "name",
+        "operator": "==",
+        "value": "Subte",
         "useNull": false,
         "caseSensitive": true
       }
