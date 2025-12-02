@@ -75,72 +75,114 @@ function calcolaRangeAnni(cityId) {
     }
 
     appState.maxYear = 2025;
-
-    // Salviamo questo stato per usarlo nella creazione UI
     appState.hasValidHistory = hasValidYears;
 
     if (!hasValidYears) {
-        // NESSUN DATO STORICO: Iniziamo direttamente dalla fine
-        appState.minYear = 2000; // Valore dummy
+        appState.minYear = 2000;
         appState.currentYear = appState.maxYear;
     } else {
-        // ABBIAMO DATI: Comportamento normale
         appState.minYear = firstEventYear - 1;
         appState.currentYear = appState.minYear;
     }
 }
 
+// MODIFICA: Aggiunto parametro 'year' opzionale per calcolo dinamico
+function calcolaLunghezzaRete(cityId, systemLineIds = null, year = null) {
+    let targetSectionIds = new Set();
+    
+    // Fallback data finale per coerenza con la logica mappa
+    let endOfTime = appState.maxYear || 2025;
+
+    if (systemLineIds) {
+        let rels = db.section_lines.filter(sl => systemLineIds.includes(sl.line_id));
+        rels.forEach(r => targetSectionIds.add(r.section_id));
+    } else {
+        let cityLines = db.lines.filter(l => l.city_id === cityId);
+        let lineIds = cityLines.map(l => l.id);
+        let rels = db.section_lines.filter(sl => lineIds.includes(sl.line_id));
+        rels.forEach(r => targetSectionIds.add(r.section_id));
+    }
+
+    let totalMeters = 0;
+    targetSectionIds.forEach(id => {
+        let section = db.sections.find(s => s.id === id);
+        if (section && section.length) {
+            let meters = parseFloat(section.length);
+
+            // FILTRO DINAMICO PER ANNO
+            if (year !== null) {
+                let b = parseYear(section.buildstart);
+                let o = parseYear(section.opening);
+
+                if (b && b < 1800) b = null;
+                if (o && o < 1800) o = null;
+
+                if (!o) o = endOfTime;
+                if (!b) {
+                    if (o === endOfTime) b = endOfTime;
+                    else b = o;
+                }
+
+                let closure = parseYear(section.closure) || 9999;
+                
+                // Contiamo la sezione se esiste nell'anno corrente (In Costruzione O Operativa)
+                let isActive = b <= year && closure > year;
+                
+                if (!isActive) meters = 0;
+            }
+
+            totalMeters += meters;
+        }
+    });
+
+    return (totalMeters / 1000).toFixed(1).replace(".", ",");
+}
+
 // --- MODULO 2: UI BUILDING BLOCKS ---
 
 function creaNavbar(container, city) {
-    let navBar = createDiv()
-        .parent(container)
-        .class(
-            "flex items-center justify-between mb-4 pb-2 border-b border-slate-100"
-        );
+    let navBar = createDiv().parent(container).class("flex items-center justify-between mb-4 pb-2 border-b border-slate-100");
+    
     let btnBack = createButton("Torna indietro");
-    btnBack
-        .parent(navBar)
-        .class(
-            "bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-md hover:bg-slate-50 font-medium transition-colors text-sm"
-        );
+    btnBack.parent(navBar).class("bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-md hover:bg-slate-50 font-medium transition-colors text-sm");
     btnBack.mousePressed(creaListaCitta);
 
-    let titleContainer = createDiv().parent(navBar).class("text-right");
-    createElement("h2", city.name)
-        .parent(titleContainer)
-        .class("text-3xl font-extrabold text-slate-800 tracking-tight");
-    createElement("div", city.country)
-        .parent(titleContainer)
-        .class("text-sm text-slate-500 font-semibold uppercase tracking-wider");
+    let titleContainer = createDiv().parent(navBar).class("text-right flex flex-col items-end");
+
+    createElement("div", city.country).parent(titleContainer).class("text-xs text-slate-400 font-bold uppercase tracking-widest mb-0.5");
+    createElement("h2", city.name).parent(titleContainer).class("text-3xl font-extrabold text-slate-800 tracking-tight leading-none");
+
+    let kmTotali = calcolaLunghezzaRete(city.id);
+    let statsDiv = createDiv().parent(titleContainer).class("flex items-center gap-2 mt-1");
+    
+    createSpan("RETE TOTALE").parent(statsDiv).class("text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded");
+    
+    // MODIFICA: Aggiunto ID per aggiornamento dinamico
+    let kmSpan = createSpan(`${kmTotali} km`).parent(statsDiv).class("text-sm font-bold text-indigo-600 tabular-nums");
+    kmSpan.id("header-total-km");
 }
 
 function creaContenitoreMappa(parentWrapper) {
-    // Wrapper principale (relativo)
     let wrapper = createDiv().parent(parentWrapper);
     wrapper.class(
         "w-full lg:w-3/4 h-full rounded-xl overflow-hidden shadow-lg relative border border-slate-200 bg-slate-50"
     );
 
-    // 1. IL LOADER (Visibile subito)
     let loaderDiv = createDiv().parent(wrapper);
     loaderDiv.id("map-loader");
     loaderDiv.class(
         "absolute inset-0 flex flex-col items-center justify-center z-10 bg-white transition-opacity duration-500"
     );
 
-    // --- SPINNER CON TAILWIND ---
     let spinner = createDiv().parent(loaderDiv);
     spinner.class(
         "w-12 h-12 border-8 border-slate-200 border-t-indigo-600 rounded-full animate-spin mb-4"
     );
 
-    // Testo sotto lo spinner
     createSpan("Loading map...")
         .parent(loaderDiv)
         .class("text-slate-400 text-sm font-semibold tracking-wide uppercase");
 
-    // 2. LA MAPPA (Invisibile all'inizio)
     let mapDivNativo = document.createElement("div");
     mapDivNativo.id = "map";
     mapDivNativo.className =
@@ -158,7 +200,6 @@ function creaSidebar(parentWrapper, city) {
         "w-full lg:w-1/4 h-full bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col"
     );
 
-    // Header Sidebar
     let sbHeader = createDiv()
         .parent(sidebar)
         .class(
@@ -173,12 +214,10 @@ function creaSidebar(parentWrapper, city) {
     );
     btnReset.mousePressed(() => resetFiltriMappa());
 
-    // Contenuto Sidebar
     let sbContent = createDiv()
         .parent(sidebar)
         .class("flex-1 overflow-y-auto p-2");
 
-    // Popolamento Linee
     let datiCitta = getDatiCitta(city.id);
     if (datiCitta.length === 0) {
         createP("Nessuna linea trovata.")
@@ -187,9 +226,6 @@ function creaSidebar(parentWrapper, city) {
         return sidebar;
     }
 
-    // --- NUOVO: ORDINAMENTO ALFABETICO ---
-
-    // 1. Ordina i SISTEMI (es. Metro prima di Tram, o A-Z)
     datiCitta.sort((a, b) => {
         let nameA = a.name.toUpperCase();
         let nameB = b.name.toUpperCase();
@@ -198,8 +234,6 @@ function creaSidebar(parentWrapper, city) {
         return 0;
     });
 
-    // 2. Ordina le LINEE dentro ogni sistema (es. M1, M2, M3...)
-    // Usiamo localCompare con numeric:true per ordinare correttamente "M1, M2, M10" (non M1, M10, M2)
     for (let system of datiCitta) {
         system.lines.sort((a, b) => {
             return a.name.localeCompare(b.name, undefined, {
@@ -208,7 +242,6 @@ function creaSidebar(parentWrapper, city) {
             });
         });
     }
-    // -------------------------------------
 
     for (let system of datiCitta) {
         costruisciSistemaUI(system, sbContent);
@@ -219,23 +252,28 @@ function creaSidebar(parentWrapper, city) {
 }
 
 function costruisciSistemaUI(system, container) {
-    let sysDetail = createElement("details")
-        .parent(container)
-        .class("group mb-2");
+    let sysDetail = createElement("details").parent(container).class("group mb-2");
     sysDetail.attribute("open", "true");
+    
+    // MODIFICA: Aggiunto attributo data per selezione sicura
+    sysDetail.attribute("data-system-name", system.name);
 
     let sysSummary = createElement("summary").parent(sysDetail);
-    sysSummary.class(
-        "cursor-pointer font-bold text-slate-800 p-2 bg-slate-100 rounded hover:bg-slate-200 select-none flex justify-between items-center"
-    );
-    createSpan(system.name).parent(sysSummary);
+    sysSummary.class("cursor-pointer font-bold text-slate-800 p-2 bg-slate-100 rounded hover:bg-slate-200 select-none flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2");
+    
+    let leftSide = createDiv().parent(sysSummary).class("flex items-center gap-2");
+    createSpan(system.name).parent(leftSide);
 
-    let badge = createSpan(`${system.lines.length} linee`);
-    badge
-        .parent(sysSummary)
-        .class(
-            "text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 ml-2"
-        );
+    let rightSide = createDiv().parent(sysSummary).class("flex items-center gap-2");
+
+    let systemLineIds = system.lines.map(l => l.id);
+    let kmSistema = calcolaLunghezzaRete(null, systemLineIds);
+
+    createSpan(`${kmSistema} km`).parent(rightSide).class("text-xs font-medium text-slate-600 bg-white border border-slate-300 px-1.5 py-0.5 rounded shadow-sm");
+    
+    let lineCount = system.lines.length;
+    let labelLinee = lineCount === 1 ? "linea" : "linee";
+    createSpan(`${lineCount} ${labelLinee}`).parent(rightSide).class("text-xs font-normal text-slate-400");
 
     let linesDiv = createDiv().parent(sysDetail).class("pl-2 mt-1 space-y-1");
 
@@ -248,6 +286,10 @@ function costruisciLineaUI(line, container) {
     let lineDetail = createElement("details")
         .parent(container)
         .class("group/line");
+    
+    // MODIFICA: Aggiunto ID univoco per nascondere/mostrare
+    lineDetail.id("line-wrapper-" + line.id);
+
     let lineSummary = createElement("summary").parent(lineDetail);
     lineSummary.class(
         "cursor-pointer p-2 rounded hover:bg-slate-50 text-sm flex flex-col items-start gap-1 select-none transition-colors"
@@ -274,45 +316,8 @@ function costruisciLineaUI(line, container) {
     stationsDiv.class("pl-6 border-l-2 border-slate-100 ml-3 mt-1 space-y-1");
 }
 
-/**
- * Popola l'elenco delle stazioni per ogni linea, dopo che i dati delle coordinate sono pronti.
- * Questa funzione viene chiamata dopo l'avvio della mappa.
- */
 function popolaStazioniUI(cityId) {
-    let datiCitta = getDatiCitta(cityId);
-    for (let system of datiCitta) {
-        for (let line of system.lines) {
-            let stationsDiv = select(`#stations-list-${line.id}`);
-            if (!stationsDiv) continue;
-
-            // Puliamo il contenitore per evitare duplicati se chiamato più volte
-            stationsDiv.html("");
-
-            if (line.stations.length > 0) {
-                // --- ORDINAMENTO GEOGRAFICO AVANZATO ---
-                // Usa la logica del Baricentro + Backtracking
-                let sortedStations = ordinaStazioniNaturalmente(line.stations);
-
-                let btnShowLine = createDiv("Isola linea").parent(stationsDiv);
-                btnShowLine.class(
-                    "text-xs font-bold text-indigo-600 cursor-pointer py-1 mb-1 hover:underline"
-                );
-                btnShowLine.mousePressed(() => isolaLineaSullaMappa(line.id));
-
-                for (let station of sortedStations) {
-                    let stElem = createDiv(station.name).parent(stationsDiv);
-                    stElem.class(
-                        "text-xs text-slate-600 hover:text-indigo-600 cursor-pointer py-1 truncate"
-                    );
-                    stElem.mousePressed(() => zoomSuStazione(station));
-                }
-            } else {
-                createDiv("Nessuna stazione.")
-                    .parent(stationsDiv)
-                    .class("text-xs text-slate-400 italic py-1");
-            }
-        }
-    }
+    updateSidebarStats(); 
 }
 
 function creaTimeline(container) {
@@ -348,7 +353,6 @@ function creaTimeline(container) {
         .parent(timelineWrapper)
         .class("w-full md:w-5/6 flex items-center gap-4 px-2");
 
-    // Bottone Play
     let btnPlay = createButton("PLAY").parent(sliderContainer);
     btnPlay.id("btn-play");
     btnPlay.attribute("disabled", "true");
@@ -361,7 +365,6 @@ function creaTimeline(container) {
         .parent(sliderContainer)
         .class("flex-grow relative");
 
-    // Slider
     let slider = createElement("input").parent(sliderWrapper);
     slider.id("timeline-slider");
     slider.attribute("type", "range");
@@ -441,14 +444,19 @@ function avviaMapbox(city, mapWrapper, lineCoordinatesMap) {
 
                 disegnaElementiMappa(city.id, city.name);
                 aggiungiInterazioniMappa();
-                popolaStazioniUI(city.id);
+                
+                updateSidebarStats(); 
+
+                if (appState.hasValidHistory) {
+                    appState.hasCompletedFirstCycle = false;
+                    togglePlayback(true);
+                }
             }, 600);
         });
     });
 }
 
 function isolaLineaSullaMappa(lineId) {
-    // Se clicco su una linea già isolata, resetto.
     if (appState.isolatedLineId === lineId) {
         resetFiltriMappa();
     } else {
@@ -459,127 +467,168 @@ function isolaLineaSullaMappa(lineId) {
 
 function resetFiltriMappa() {
     appState.isolatedLineId = null;
-    // Se siamo in playback, fermiamolo per evitare confusione
     if (appState.isPlaying) togglePlayback(false);
     aggiornaFiltriCombinati();
 }
 
+// MODIFICA: Logica completamente dinamica per numeri, visibilità e stazioni
 function updateSidebarStats() {
+    if (!appState.activeCityId) return;
+    
     let year = appState.currentYear;
-    let cityLines = db.lines.filter((l) => l.city_id == appState.activeCityId);
-
-    // Usiamo lo stesso fallback della Mappa
     let endOfTime = appState.maxYear || 2025;
+    
+    // 1. HEADER DINAMICO
+    let headerKm = select("#header-total-km");
+    if (headerKm) {
+        let totalCityKm = calcolaLunghezzaRete(appState.activeCityId, null, year);
+        headerKm.html(`${totalCityKm} km`);
+    }
 
-    for (let line of cityLines) {
-        let spanId = `#line-stats-${line.id}`;
-        let container = select(spanId);
-        if (!container) continue;
+    let datiCitta = getDatiCitta(appState.activeCityId);
 
-        let rels = db.section_lines.filter((sl) => sl.line_id === line.id);
-        let sections = rels
-            .map((r) => db.sections.find((s) => s.id === r.section_id))
-            .filter((s) => s);
+    for (let system of datiCitta) {
+        // Selezione sicura tramite attributo dati (NO p5 select per evitare errori)
+        let allSystems = document.querySelectorAll(`details[data-system-name="${system.name}"]`);
+        if(allSystems.length === 0) continue;
+        let sysDetailNative = allSystems[0];
+        
+        let activeLinesCount = 0;
+        let systemLineIds = [];
 
-        let kmOp = 0;
-        let kmCons = 0;
+        for (let line of system.lines) {
+            let lineWrapper = select(`#line-wrapper-${line.id}`);
+            if (!lineWrapper) continue;
 
-        for (let s of sections) {
-            let len = s.length || 0;
-            if (len > 100) len = len / 1000;
+            let rels = db.section_lines.filter((sl) => sl.line_id === line.id);
+            let sections = rels
+                .map((r) => db.sections.find((s) => s.id === r.section_id))
+                .filter((s) => s);
 
-            let b = parseYear(s.buildstart);
-            let o = parseYear(s.opening);
+            let kmOp = 0;
+            let kmCons = 0;
+            let isLineActiveInYear = false;
 
-            // 1. FIX DATI SPORCHI (UGUALE A LOGIC_MAP)
-            if (b && b < 1800) b = null;
-            if (o && o < 1800) o = null;
+            for (let s of sections) {
+                let len = s.length || 0;
+                if (len > 100) len = len / 1000;
 
-            // 2. LOGICA "SNAPSHOT" vs "COSTRUZIONE" (UGUALE A LOGIC_MAP)
-            if (!o) {
-                if (b) {
-                    o = 9999;
-                } else {
-                    o = endOfTime;
-                }
-            }
-
-            if (!b) {
-                if (o !== endOfTime) b = o;
-                else b = endOfTime;
-            }
-
-            // 3. CALCOLO STATO
-            let closure = parseYear(s.closure) || 9999;
-            let isOp = o <= year && closure > year;
-            let isCons = b <= year && o > year;
-
-            if (isOp) kmOp += len;
-            if (isCons) kmCons += len;
-        }
-
-        // --- STAZIONI (Logica semplificata per UI) ---
-        let stationRels = db.station_lines.filter(
-            (sl) => sl.line_id === line.id
-        );
-        let visibleStationCount = 0;
-
-        for (let rel of stationRels) {
-            let station = db.stations.find((s) => s.id === rel.station_id);
-            if (station) {
-                let b = parseYear(station.buildstart);
-                let o = parseYear(station.opening);
-                let c = parseYear(station.closure) || 9999;
+                let b = parseYear(s.buildstart);
+                let o = parseYear(s.opening);
 
                 if (b && b < 1800) b = null;
                 if (o && o < 1800) o = null;
 
-                if (!o) {
-                    if (b) o = 9999;
-                    else o = endOfTime;
+                if (!o) o = endOfTime;
+                if (!b) {
+                    if (o === endOfTime) b = endOfTime;
+                    else b = o;
                 }
 
-                if (o <= year && c > year) {
-                    visibleStationCount++;
+                let closure = parseYear(s.closure) || 9999;
+                let isOp = o <= year && closure > year;
+                let isCons = b <= year && o > year;
+
+                if (isOp) kmOp += len;
+                if (isCons) kmCons += len;
+                
+                // Se esiste (cantiere o operativa), è attiva
+                if (isOp || isCons) isLineActiveInYear = true;
+            }
+
+            // VISIBILITÀ LINEA
+            if (isLineActiveInYear) {
+                lineWrapper.style('display', 'block');
+                activeLinesCount++;
+                systemLineIds.push(line.id);
+            } else {
+                lineWrapper.style('display', 'none');
+                continue; 
+            }
+
+            // AGGIORNAMENTO BADGE STATISTICHE LINEA
+            let statsContainer = select(`#line-stats-${line.id}`);
+            if (statsContainer) {
+                let htmlParts = [];
+                // Qui dovremmo calcolare le stazioni VISIBILI per il badge (semplificato: se linea attiva, controlla stazioni)
+                
+                // Ricostruiamo lista stazioni per contare quelle attive
+                let stationRels = db.station_lines.filter((sl) => sl.line_id === line.id);
+                let activeStations = [];
+                for (let rel of stationRels) {
+                    let station = db.stations.find((s) => s.id === rel.station_id);
+                    if (station) {
+                        let b = parseYear(station.buildstart);
+                        let o = parseYear(station.opening);
+                        let c = parseYear(station.closure) || 9999;
+                        if (b && b < 1800) b = null;
+                        if (o && o < 1800) o = null;
+                        if (!o) o = endOfTime;
+                        if (!b) { if (o === endOfTime) b = endOfTime; else b = o; }
+                        if (b <= year && c > year) activeStations.push(station);
+                    }
+                }
+                
+                let visibleStationCount = activeStations.length;
+                if (visibleStationCount > 0) {
+                    let label = visibleStationCount === 1 ? "STAZIONE" : "STAZIONI";
+                    htmlParts.push(`<span class="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">${visibleStationCount} ${label}</span>`);
+                }
+                if (kmCons > 0) {
+                    htmlParts.push(`<span class="text-[10px] font-bold text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded border border-orange-200">IN COSTRUZIONE: ${kmCons.toFixed(1)}km</span>`);
+                }
+                if (kmOp > 0) {
+                    htmlParts.push(`<span class="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">OPERATIVI: ${kmOp.toFixed(1)}km</span>`);
+                }
+                if (sections.length === 0 && stationRels.length === 0) {
+                    htmlParts.push(`<span class="text-[10px] font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">DATI MANCANTI</span>`);
+                }
+                statsContainer.html(htmlParts.join(""));
+
+                // LISTA STAZIONI (Renderizzata solo se linea attiva)
+                let stationsDiv = select(`#stations-list-${line.id}`);
+                if (stationsDiv) {
+                    stationsDiv.html(""); // Pulisci
+                    if (visibleStationCount > 0) {
+                        let sortedStations = ordinaStazioniNaturalmente(activeStations);
+                        let btnShowLine = createDiv("Isola linea").parent(stationsDiv);
+                        btnShowLine.class("text-xs font-bold text-indigo-600 cursor-pointer py-1 mb-1 hover:underline");
+                        btnShowLine.mousePressed(() => isolaLineaSullaMappa(line.id));
+
+                        for (let station of sortedStations) {
+                            let stElem = createDiv(station.name).parent(stationsDiv);
+                            stElem.class("text-xs text-slate-600 hover:text-indigo-600 cursor-pointer py-1 truncate");
+                            stElem.mousePressed(() => zoomSuStazione(station));
+                        }
+                    } else {
+                        createDiv("Nessuna stazione visibile.").parent(stationsDiv).class("text-xs text-slate-400 italic py-1");
+                    }
                 }
             }
         }
 
-        let htmlParts = [];
-        if (visibleStationCount > 0) {
-            let label = visibleStationCount === 1 ? "STAZIONE" : "STAZIONI";
-            htmlParts.push(
-                `<span class="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">${visibleStationCount} ${label}</span>`
-            );
+        // VISIBILITÀ SISTEMA
+        if (activeLinesCount > 0) {
+            sysDetailNative.style.display = 'block';
+            let rightSide = sysDetailNative.querySelector("summary > div:last-child");
+            if(rightSide) {
+                let kmSistema = calcolaLunghezzaRete(appState.activeCityId, systemLineIds, year);
+                let labelLinee = activeLinesCount === 1 ? "linea" : "linee";
+                rightSide.innerHTML = `
+                    <span class="text-xs font-medium text-slate-600 bg-white border border-slate-300 px-1.5 py-0.5 rounded shadow-sm">${kmSistema} km</span>
+                    <span class="text-xs font-normal text-slate-400">${activeLinesCount} ${labelLinee}</span>
+                `;
+            }
+        } else {
+            sysDetailNative.style.display = 'none';
         }
-        if (kmCons > 0) {
-            htmlParts.push(
-                `<span class="text-[10px] font-bold text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded border border-orange-200">IN COSTRUZIONE: ${kmCons.toFixed(
-                    1
-                )}km</span>`
-            );
-        }
-        if (kmOp > 0) {
-            htmlParts.push(
-                `<span class="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">OPERATIVI: ${kmOp.toFixed(
-                    1
-                )}km</span>`
-            );
-        }
-        if (sections.length === 0 && stationRels.length === 0) {
-            htmlParts.push(
-                `<span class="text-[10px] font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">DATI MANCANTI</span>`
-            );
-        }
-        container.html(htmlParts.join(""));
     }
 }
 
-// --- FUNZIONE MST + SUBTREE SIZE (vicoli ciechi prima) ---
+// --- FUNZIONE MST + SUBTREE SIZE (Invariato) ---
 function ordinaStazioniNaturalmente(stations) {
     if (!stations || stations.length < 2) return stations;
 
-    // 1. Preparazione Nodi e MST (Invariato, funziona bene)
     let nodes = stations
         .map((s, i) => {
             let coords = parseGeometry(s.geometry);
@@ -591,7 +640,6 @@ function ordinaStazioniNaturalmente(stations) {
 
     if (nodes.length === 0) return stations;
 
-    // Costruzione MST semplice (Distanza Euclidea)
     let edges = [];
     for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
@@ -624,28 +672,23 @@ function ordinaStazioniNaturalmente(stations) {
         }
     }
 
-    // 2. Identifica Start (Ovest)
     let leaves = nodes.filter((n) => n.adj.length === 1);
     if (leaves.length === 0) leaves = nodes;
     leaves.sort((a, b) => a.coords[0] - b.coords[0]);
     let startNode = leaves[0];
 
-    // 3. DFS Principale
     let finalOrder = [];
     let stack = [startNode];
     startNode.visited = true;
 
-    // Funzione per contare i nodi nel ramo (Senza visitare davvero)
     function getBranchSize(node, fromNode) {
         let size = 1;
         let q = [node];
-        let seen = new Set([fromNode, node]); // Blocchiamo il ritorno
+        let seen = new Set([fromNode, node]);
 
         while (q.length > 0) {
             let curr = q.shift();
             for (let n of curr.adj) {
-                // Conta solo nodi non visitati globalmente (ancora da fare)
-                // E non tornare indietro verso 'fromNode'
                 if (!n.visited && !seen.has(n)) {
                     seen.add(n);
                     size++;
@@ -663,21 +706,9 @@ function ordinaStazioniNaturalmente(stations) {
         let neighbors = curr.adj.filter((n) => !n.visited);
 
         if (neighbors.length > 0) {
-            // Calcola dimensioni rami
             let weightedNeighbors = neighbors.map((n) => {
                 return { node: n, size: getBranchSize(n, curr) };
             });
-
-            // ORDINAMENTO STACK:
-            // Vogliamo estrarre PRIMA i rami PICCOLI (Size basso).
-            // Stack LIFO: Ultimo Inserito = Primo Estratto.
-            // Quindi inseriamo: [Grande, Medio, Piccolo].
-            // Estrazione: Piccolo -> Medio -> Grande.
-
-            // Ordiniamo per Size DECRESCENTE (Grande -> Piccolo)
-            // Array: [Romolo(20), Abbiategrasso(1)]
-            // Push Romolo (Fondo). Push Abbiategrasso (Cima).
-            // Pop -> Abbiategrasso.
 
             weightedNeighbors.sort((a, b) => b.size - a.size);
 
@@ -688,7 +719,6 @@ function ordinaStazioniNaturalmente(stations) {
         }
     }
 
-    // Recupero isole
     let unvisited = nodes.filter((n) => !n.visited);
     if (unvisited.length > 0) {
         unvisited.sort((a, b) => a.coords[0] - b.coords[0]);
